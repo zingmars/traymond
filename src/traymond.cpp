@@ -15,6 +15,7 @@
 #include <thread>
 
 #define VK_Z_KEY 0x5A
+#define VK_A_KEY 0x41
 #define WM_ICON 0x1C0A
 #define WM_OURICON 0x1C0B
 #define EXIT_ID 0x99
@@ -32,8 +33,10 @@ using namespace std;
 bool isRunning = true;
 HWND lastEplorerHandle = 0;
 WORD TRAY_KEY = VK_Z_KEY;
+WORD UNTRAY_KEY = VK_A_KEY;
 WORD MOD_KEY = MOD_WIN + MOD_SHIFT;
-string MY_KEY = "Win+Shift+Z";
+string MY_TRAY_KEY = "Win+Shift+Z";
+string MY_UNTRAY_KEY = "Win+Shift+A";
 bool multiIcons = true;
 bool initializated = false;
 WORD itmCounter = 0;
@@ -122,13 +125,13 @@ bool toggleAutorun(TRCONTEXT* context, bool toggle)
 {
     DWORD buffSize = 1024;
     char buff[1024];
-    if (RegGetValue(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", "Traymond II", RRF_RT_REG_SZ, nullptr, buff, &buffSize) == ERROR_SUCCESS)
+    if (RegGetValue(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", "Traymond", RRF_RT_REG_SZ, nullptr, buff, &buffSize) == ERROR_SUCCESS)
     {
         if (toggle)
         {
             HKEY hkey = NULL;
             LONG createStatus = RegCreateKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &hkey);
-            RegDeleteValue(hkey, "Traymond II");
+            RegDeleteValue(hkey, "Traymond");
             RegCloseKey(hkey);
             //MessageBox(0, "Traymond successfully removed from autorun", "Traymond II", 0);
             setMenuItemChecked(context, MNIT_AUTORUN, false);
@@ -141,10 +144,10 @@ bool toggleAutorun(TRCONTEXT* context, bool toggle)
         if (toggle)
         {
             std::string cmdLine = getExecutablePath();
-            cmdLine += " \"\/key=" + MY_KEY + "\"";
+            cmdLine += " \"/key=" + MY_TRAY_KEY + "\"";
             HKEY hkey = NULL;
             LONG createStatus = RegCreateKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &hkey);
-            LONG status = RegSetValueEx(hkey, "Traymond II", 0, REG_SZ, (BYTE*)cmdLine.c_str(), (cmdLine.size() + 1) * sizeof(wchar_t));
+            LONG status = RegSetValueEx(hkey, "Traymond", 0, REG_SZ, (BYTE*)cmdLine.c_str(), (cmdLine.size() + 1) * sizeof(wchar_t));
             RegCloseKey(hkey);
             //MessageBox(0, "Traymond successfully added to autorun", "Traymond II", 0);
             setMenuItemChecked(context, MNIT_AUTORUN, true);
@@ -516,25 +519,18 @@ void createTrayMenu(TRCONTEXT* context) {
     showAllMenuItem.cbSize = sizeof(MENUITEMINFO);
     showAllMenuItem.fMask = MIIM_STRING | MIIM_ID;
     showAllMenuItem.fType = MFT_STRING;
-    showAllMenuItem.dwTypeData = "Restore All Windows";
-    showAllMenuItem.cch = 20;
+    std::string restoreLabel = "Restore All Windows (" + MY_UNTRAY_KEY + ")";
+    showAllMenuItem.dwTypeData = (LPSTR)restoreLabel.c_str();
+    showAllMenuItem.cch = restoreLabel.size();
     showAllMenuItem.wID = SHOW_ALL_ID;
-
-    MENUITEMINFO homePageItem;
-    homePageItem.cbSize = sizeof(MENUITEMINFO);
-    homePageItem.fMask = MIIM_STRING | MIIM_ID;
-    homePageItem.fType = MFT_STRING;
-    homePageItem.dwTypeData = "Web site (github.com/dkxce/traymond)";
-    homePageItem.cch = 37;
-    homePageItem.wID = SHOW_HOMEPAGE;
 
     MENUITEMINFO hideFgndWndItem;
     hideFgndWndItem.cbSize = sizeof(MENUITEMINFO);
     hideFgndWndItem.fMask = MIIM_STRING | MIIM_ID;
     hideFgndWndItem.fType = MFT_STRING;
-    string home_page = "Hide Foreground Window to Tray (" + MY_KEY + ")";
-    hideFgndWndItem.dwTypeData = (LPSTR)home_page.c_str();
-    hideFgndWndItem.cch = home_page.size();
+    string hideLabel = "Hide Foreground Window to Tray (" + MY_TRAY_KEY + ")";
+    hideFgndWndItem.dwTypeData = (LPSTR)hideLabel.c_str();
+    hideFgndWndItem.cch = hideLabel.size();
     hideFgndWndItem.wID = HIDE_FOREGROUND;
 
     MENUITEMINFO autoRunMenu;
@@ -557,7 +553,6 @@ void createTrayMenu(TRCONTEXT* context) {
    
     InsertMenuItem(context->trayMenu, 0, FALSE, &nonMultiMenuItem);
     InsertMenuItem(context->trayMenu, 0, FALSE, &autoRunMenu);
-    InsertMenuItem(context->trayMenu, 0, FALSE, &homePageItem);
     InsertMenuItem(context->trayMenu, 0, FALSE, &exitMenuItem);
     InsertMenu(context->trayMenu, 0, MF_SEPARATOR | MF_BYPOSITION, 0, NULL);
     InsertMenuItem(context->trayMenu, 0, FALSE, &showAllMenuItem);
@@ -586,9 +581,9 @@ void exitApp()
 // Creates and reads the save file to restore hidden windows in case of unexpected termination
 void startup(TRCONTEXT* context) 
 {
-    if ((saveFile = CreateFile("traymond2.dat", GENERIC_READ | GENERIC_WRITE, \
+    if ((saveFile = CreateFile("traymond.dat", GENERIC_READ | GENERIC_WRITE, \
         0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
-        MessageBox(NULL, "Error! Traymond could not create a save file.", "Traymond II", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Error! Traymond could not create a save file.", "Traymond", MB_OK | MB_ICONERROR);
         exitApp();
     };
 
@@ -726,9 +721,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     case HIDE_FOREGROUND:                             
                         hideNextForegroundWindow(context);                  
                         break;
-                    case SHOW_HOMEPAGE:                    
-                        ShellExecuteA(0, 0, "explorer.exe", "http://github.com/dkxce/traymond", 0, SW_SHOWMAXIMIZED);                                     
-                        break;
                     case SHOW_ALL_ID:
                         showAllWindows(context);
                         break;
@@ -740,8 +732,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     clickWindowMenuItem(context, LOWORD(wParam));
             };
             break;
-        case WM_HOTKEY: // We only have one hotkey, so no need to check the message
-            minimizeToTray(context, NULL);
+        case WM_HOTKEY:
+            if (wParam == 0) {
+                minimizeToTray(context, NULL);
+            }
+            else if (wParam == 1) {
+                showAllWindows(context);
+            }
             break;
         default:     
             if (uMsg == uTaskbarCreatedMsg) lastEplorerHandle = (HWND)-1;
@@ -768,48 +765,48 @@ void initHotKey(LPSTR lpCmdLine)
             if (pos2 > pos) token = args.substr(pos + 5, pos2 - pos - 5);
             else token = args.substr(pos + 5);
 
-            MY_KEY = "";
+            MY_TRAY_KEY = "";
             MOD_KEY = 0;
-            if (token.find("ALT") != std::string::npos) { MOD_KEY += 0x0001; MY_KEY += "+Alt"; };
-            if (token.find("CONTROL") != std::string::npos) { MOD_KEY += 0x0002; MY_KEY += "+Ctrl"; };
-            if (token.find("CTRL") != std::string::npos) { MOD_KEY += 0x0002; MY_KEY += "+Ctrl"; };
-            if (token.find("SHIFT") != std::string::npos) { MOD_KEY += 0x0004; MY_KEY += "+Shift"; };
-            if (token.find("WIN") != std::string::npos) { MOD_KEY += 0x0008; MY_KEY += "+Win"; };
+            if (token.find("ALT") != std::string::npos) { MOD_KEY += 0x0001; MY_TRAY_KEY += "+Alt"; };
+            if (token.find("CONTROL") != std::string::npos) { MOD_KEY += 0x0002; MY_TRAY_KEY += "+Ctrl"; };
+            if (token.find("CTRL") != std::string::npos) { MOD_KEY += 0x0002; MY_TRAY_KEY += "+Ctrl"; };
+            if (token.find("SHIFT") != std::string::npos) { MOD_KEY += 0x0004; MY_TRAY_KEY += "+Shift"; };
+            if (token.find("WIN") != std::string::npos) { MOD_KEY += 0x0008; MY_TRAY_KEY += "+Win"; };
 
             size_t last = token.find_last_of("+");
             if (last != std::string::npos)
             {
                 token = token.substr(last + 1);
                 // https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
-                if (token.find("BACK") != std::string::npos) { TRAY_KEY = 0x08; MY_KEY += "+Back"; }
-                else if (token.find("TAB") != std::string::npos) { TRAY_KEY = 0x09; MY_KEY += "+Tab"; }
-                else if (token.find("PAUSE") != std::string::npos) { TRAY_KEY = 0x13; MY_KEY += "+Pause"; }
-                else if (token.find("SPACE") != std::string::npos) { TRAY_KEY = 0x20; MY_KEY += "+Space"; }
-                else if (token.find("PRIOR") != std::string::npos) { TRAY_KEY = 0x21; MY_KEY += "+PageUp"; }
-                else if (token.find("PAGEUP") != std::string::npos) { TRAY_KEY = 0x21; MY_KEY += "+PageUp"; }
-                else if (token.find("NEXT") != std::string::npos) { TRAY_KEY = 0x22;  MY_KEY += "+PageDown"; }
-                else if (token.find("PAGEDOWN") != std::string::npos) { TRAY_KEY = 0x22;  MY_KEY += "+PageDown"; }
-                else if (token.find("END") != std::string::npos) { TRAY_KEY = 0x23; MY_KEY += "+End"; }
-                else if (token.find("HOME") != std::string::npos) { TRAY_KEY = 0x24; MY_KEY += "+Home"; }
-                else if (token.find("LEFT") != std::string::npos) { TRAY_KEY = 0x25; MY_KEY += "+Left"; }
-                else if (token.find("UP") != std::string::npos) { TRAY_KEY = 0x26; MY_KEY += "+Up"; }
-                else if (token.find("RIGHT") != std::string::npos) { TRAY_KEY = 0x27; MY_KEY += "+Right"; }
-                else if (token.find("DOWN") != std::string::npos) { TRAY_KEY = 0x28; MY_KEY += "+Down"; }
-                else if (token.find("PRINT") != std::string::npos) { TRAY_KEY = 0x2A; MY_KEY += "+PrintScr"; }
-                else if (token.find("INS") != std::string::npos) { TRAY_KEY = 0x2D; MY_KEY += "+Ins"; }
-                else if (token.find("DEL") != std::string::npos) { TRAY_KEY = 0x2E; MY_KEY += "+Del"; }
-                else if (token.find("F10") != std::string::npos) { TRAY_KEY = 0x79; MY_KEY += "+F10"; }
-                else if (token.find("F11") != std::string::npos) { TRAY_KEY = 0x7A; MY_KEY += "+F11"; }
-                else if (token.find("F12") != std::string::npos) { TRAY_KEY = 0x7B; MY_KEY += "+F12"; }
-                else if (token.find("F1") != std::string::npos) { TRAY_KEY = 0x70; MY_KEY += "+F1"; }
-                else if (token.find("F2") != std::string::npos) { TRAY_KEY = 0x71; MY_KEY += "+F2"; }
-                else if (token.find("F3") != std::string::npos) { TRAY_KEY = 0x72; MY_KEY += "+F3"; }
-                else if (token.find("F4") != std::string::npos) { TRAY_KEY = 0x73; MY_KEY += "+F4"; }
-                else if (token.find("F5") != std::string::npos) { TRAY_KEY = 0x74; MY_KEY += "+F5"; }
-                else if (token.find("F6") != std::string::npos) { TRAY_KEY = 0x75; MY_KEY += "+F5"; }
-                else if (token.find("F7") != std::string::npos) { TRAY_KEY = 0x76; MY_KEY += "+F7"; }
-                else if (token.find("F8") != std::string::npos) { TRAY_KEY = 0x77; MY_KEY += "+F8"; }
-                else if (token.find("F9") != std::string::npos) { TRAY_KEY = 0x78; MY_KEY += "+F9"; }
+                if (token.find("BACK") != std::string::npos) { TRAY_KEY = 0x08; MY_TRAY_KEY += "+Back"; }
+                else if (token.find("TAB") != std::string::npos) { TRAY_KEY = 0x09; MY_TRAY_KEY += "+Tab"; }
+                else if (token.find("PAUSE") != std::string::npos) { TRAY_KEY = 0x13; MY_TRAY_KEY += "+Pause"; }
+                else if (token.find("SPACE") != std::string::npos) { TRAY_KEY = 0x20; MY_TRAY_KEY += "+Space"; }
+                else if (token.find("PRIOR") != std::string::npos) { TRAY_KEY = 0x21; MY_TRAY_KEY += "+PageUp"; }
+                else if (token.find("PAGEUP") != std::string::npos) { TRAY_KEY = 0x21; MY_TRAY_KEY += "+PageUp"; }
+                else if (token.find("NEXT") != std::string::npos) { TRAY_KEY = 0x22;  MY_TRAY_KEY += "+PageDown"; }
+                else if (token.find("PAGEDOWN") != std::string::npos) { TRAY_KEY = 0x22;  MY_TRAY_KEY += "+PageDown"; }
+                else if (token.find("END") != std::string::npos) { TRAY_KEY = 0x23; MY_TRAY_KEY += "+End"; }
+                else if (token.find("HOME") != std::string::npos) { TRAY_KEY = 0x24; MY_TRAY_KEY += "+Home"; }
+                else if (token.find("LEFT") != std::string::npos) { TRAY_KEY = 0x25; MY_TRAY_KEY += "+Left"; }
+                else if (token.find("UP") != std::string::npos) { TRAY_KEY = 0x26; MY_TRAY_KEY += "+Up"; }
+                else if (token.find("RIGHT") != std::string::npos) { TRAY_KEY = 0x27; MY_TRAY_KEY += "+Right"; }
+                else if (token.find("DOWN") != std::string::npos) { TRAY_KEY = 0x28; MY_TRAY_KEY += "+Down"; }
+                else if (token.find("PRINT") != std::string::npos) { TRAY_KEY = 0x2A; MY_TRAY_KEY += "+PrintScr"; }
+                else if (token.find("INS") != std::string::npos) { TRAY_KEY = 0x2D; MY_TRAY_KEY += "+Ins"; }
+                else if (token.find("DEL") != std::string::npos) { TRAY_KEY = 0x2E; MY_TRAY_KEY += "+Del"; }
+                else if (token.find("F10") != std::string::npos) { TRAY_KEY = 0x79; MY_TRAY_KEY += "+F10"; }
+                else if (token.find("F11") != std::string::npos) { TRAY_KEY = 0x7A; MY_TRAY_KEY += "+F11"; }
+                else if (token.find("F12") != std::string::npos) { TRAY_KEY = 0x7B; MY_TRAY_KEY += "+F12"; }
+                else if (token.find("F1") != std::string::npos) { TRAY_KEY = 0x70; MY_TRAY_KEY += "+F1"; }
+                else if (token.find("F2") != std::string::npos) { TRAY_KEY = 0x71; MY_TRAY_KEY += "+F2"; }
+                else if (token.find("F3") != std::string::npos) { TRAY_KEY = 0x72; MY_TRAY_KEY += "+F3"; }
+                else if (token.find("F4") != std::string::npos) { TRAY_KEY = 0x73; MY_TRAY_KEY += "+F4"; }
+                else if (token.find("F5") != std::string::npos) { TRAY_KEY = 0x74; MY_TRAY_KEY += "+F5"; }
+                else if (token.find("F6") != std::string::npos) { TRAY_KEY = 0x75; MY_TRAY_KEY += "+F5"; }
+                else if (token.find("F7") != std::string::npos) { TRAY_KEY = 0x76; MY_TRAY_KEY += "+F7"; }
+                else if (token.find("F8") != std::string::npos) { TRAY_KEY = 0x77; MY_TRAY_KEY += "+F8"; }
+                else if (token.find("F9") != std::string::npos) { TRAY_KEY = 0x78; MY_TRAY_KEY += "+F9"; }
                 else
                 {
                     string str = "0123456789xxxxxxxABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -817,11 +814,11 @@ void initHotKey(LPSTR lpCmdLine)
                         if (token[0] == str[i])
                         {
                             TRAY_KEY = 0x30 + i;
-                            MY_KEY += "+";
-                            MY_KEY += str[i];
+                            MY_TRAY_KEY += "+";
+                            MY_TRAY_KEY += str[i];
                         };
                 };
-                MY_KEY = MY_KEY.substr(1);
+                MY_TRAY_KEY = MY_TRAY_KEY.substr(1);
             };
         };
     }
@@ -830,7 +827,7 @@ void initHotKey(LPSTR lpCmdLine)
     {
         TRAY_KEY = VK_Z_KEY;
         MOD_KEY = MOD_WIN + MOD_SHIFT;
-        MY_KEY = "Win+Shift+Z";
+        MY_TRAY_KEY = "Win+Shift+Z";
     };
 }
 
@@ -848,7 +845,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HANDLE mutex = CreateMutex(NULL, TRUE, szUniqueNamedMutex);
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
-        MessageBox(NULL, "Error! Another instance of Traymond is already running.", "Traymond II", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Error! Another instance of Traymond is already running.", "Traymond", MB_OK | MB_ICONERROR);
         return 1;
     }
 
@@ -876,7 +873,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     SetWindowLongPtr(context.mainWindow, GWLP_USERDATA, reinterpret_cast<LONG>(&context));
 
     if (!RegisterHotKey(context.mainWindow, 0, MOD_KEY | MOD_NOREPEAT, TRAY_KEY)) {
-        MessageBox(NULL, "Error! Could not register the hotkey.", "Traymond II", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Error! Could not register the hotkey.", "Traymond", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    if (!RegisterHotKey(context.mainWindow, 1, MOD_KEY | MOD_NOREPEAT, UNTRAY_KEY)) {
+        MessageBox(NULL, "Error! Could not register the hotkey.", "Traymond", MB_OK | MB_ICONERROR);
         return 1;
     }
 
