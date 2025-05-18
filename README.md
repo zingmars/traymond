@@ -50,6 +50,8 @@ Supported combinations:
 Building
 --------
 
+NOTE: Has to be built as a Win32 (not x64) app!
+
 ### Nmake
 
 `> nmake`

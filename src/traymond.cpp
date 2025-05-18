@@ -9,13 +9,17 @@
 #include <windowsx.h>
 #include <string>
 #include <vector>
-#include <string>
 #include <sstream>
 #include <iomanip>
 #include <thread>
+#include <mmdeviceapi.h>
+#include <endpointvolume.h>
+#include <audiopolicy.h>
+#include <chrono>
 
 #define VK_Z_KEY 0x5A
 #define VK_A_KEY 0x41
+#define VK_X_KEY 0x58
 #define WM_ICON 0x1C0A
 #define WM_OURICON 0x1C0B
 #define EXIT_ID 0x99
@@ -24,19 +28,23 @@
 #define HIDE_FOREGROUND 0x96
 #define MNIT_AUTORUN 0x95
 #define MNIT_MLTICNS 0x94
+#define MUTE_FOREGROUND 0x93
+#define MUTE_MIXER 0x92
 #define FIRST_MENU 0xA0
 #define MAXIMUM_WINDOWS 100
 
-
 using namespace std;
+using namespace std::chrono_literals;
+
+//TODO: Load keys dynamically from the strings
+string MY_TRAY_KEY = "Win+Shift+Z";
+string MY_UNTRAY_KEY = "Win+Shift+X";
+WORD MOD_KEY = MOD_WIN + MOD_SHIFT;
+WORD TRAY_KEY = VK_Z_KEY;
+WORD UNTRAY_KEY = VK_X_KEY;
 
 bool isRunning = true;
 HWND lastEplorerHandle = 0;
-WORD TRAY_KEY = VK_Z_KEY;
-WORD UNTRAY_KEY = VK_A_KEY;
-WORD MOD_KEY = MOD_WIN + MOD_SHIFT;
-string MY_TRAY_KEY = "Win+Shift+Z";
-string MY_UNTRAY_KEY = "Win+Shift+A";
 bool multiIcons = true;
 bool initializated = false;
 WORD itmCounter = 0;
@@ -133,7 +141,7 @@ bool toggleAutorun(TRCONTEXT* context, bool toggle)
             LONG createStatus = RegCreateKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &hkey);
             RegDeleteValue(hkey, "Traymond");
             RegCloseKey(hkey);
-            //MessageBox(0, "Traymond successfully removed from autorun", "Traymond II", 0);
+            //MessageBox(0, "Traymond successfully removed from autorun", "Traymond", 0);
             setMenuItemChecked(context, MNIT_AUTORUN, false);
             return false;
         };
@@ -144,12 +152,12 @@ bool toggleAutorun(TRCONTEXT* context, bool toggle)
         if (toggle)
         {
             std::string cmdLine = getExecutablePath();
-            cmdLine += " \"/key=" + MY_TRAY_KEY + "\"";
+            cmdLine += " \"\/key=" + MY_TRAY_KEY + "\"";
             HKEY hkey = NULL;
             LONG createStatus = RegCreateKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &hkey);
             LONG status = RegSetValueEx(hkey, "Traymond", 0, REG_SZ, (BYTE*)cmdLine.c_str(), (cmdLine.size() + 1) * sizeof(wchar_t));
             RegCloseKey(hkey);
-            //MessageBox(0, "Traymond successfully added to autorun", "Traymond II", 0);
+            //MessageBox(0, "Traymond successfully added to autorun", "Traymond", 0);
             setMenuItemChecked(context, MNIT_AUTORUN, true);
             return true;
         };
@@ -198,7 +206,7 @@ bool toggleMultiIcons(TRCONTEXT* context, bool toggle)
             RegCloseKey(hkey);
             setMenuItemChecked(context, MNIT_MLTICNS, true);
             //
-            if(context->iconIndex > 0)
+            if (context->iconIndex > 0)
                 for (int i = 0; i < context->iconIndex; i++)
                     Shell_NotifyIcon(NIM_DELETE, &context->icons[i].icon);
             //
@@ -280,7 +288,7 @@ HBITMAP resizeBitmap(HBITMAP hbmpSrc)
 }
 
 // Restore Window
-void showWindow(TRCONTEXT* context, LPARAM lParam) 
+void showWindow(TRCONTEXT* context, LPARAM lParam)
 {
     std::vector<HIDDEN_WINDOW> temp = std::vector<HIDDEN_WINDOW>();
     for (int i = 0; i < context->iconIndex; i++)
@@ -289,7 +297,7 @@ void showWindow(TRCONTEXT* context, LPARAM lParam)
         if (context->icons[i].icon.uID == HIWORD(lParam))
         {
             ShowWindow(context->icons[i].window, SW_SHOW);
-            SetForegroundWindow(context->icons[i].window);            
+            SetForegroundWindow(context->icons[i].window);
         }
         else temp.push_back(context->icons[i]);
     };
@@ -300,13 +308,13 @@ void showWindow(TRCONTEXT* context, LPARAM lParam)
         if (temp.size() > 0)
         {
             memcpy_s(context->icons, sizeof(context->icons), &temp.front(), sizeof(HIDDEN_WINDOW) * temp.size());
-            if(multiIcons)
+            if (multiIcons)
                 for (int i = 0; i < temp.size(); i++)
                 {
                     Shell_NotifyIcon(NIM_ADD, &temp[i].icon);
                     Shell_NotifyIcon(NIM_SETVERSION, &temp[i].icon);
                 };
-        }; 
+        };
     };
     temp.clear();
     save(context);
@@ -373,7 +381,7 @@ bool checkIfSelfTrayed(HWND winHandle)
 {
     const int TB_BUTTONCOUNT = WM_USER + 24;
     const int TB_GETBUTTON = WM_USER + 23;
-    
+
     bool result = false;
     HWND trayHandle, trayProcess, trayMemory;
     DWORD trayThread, trayIcons, bytesRead;
@@ -389,22 +397,22 @@ bool checkIfSelfTrayed(HWND winHandle)
         && ((trayProcess = (HWND)OpenProcess(PROCESS_ALL_ACCESS, false, trayThread)) > 0)
         && ((trayMemory = (HWND)VirtualAllocEx(trayProcess, 0, 4096, MEM_COMMIT, PAGE_READWRITE)) > 0)
         && ((trayIcons = SendMessage(trayHandle, TB_BUTTONCOUNT, 0, 0)) > 0))
-        {
-            for (int i = 0; i < trayIcons; i++)
-                if ((SendMessage(trayHandle, TB_GETBUTTON, i, ((int)trayMemory)) > 0)
-                    && ReadProcessMemory(trayProcess, trayMemory, &trayButton, sizeof(trayButton), &bytesRead) 
-                    && (trayButton.dwData > 0) 
-                    && ReadProcessMemory(trayProcess, (LPVOID)(trayButton.dwData), &(trayIcon.hWnd), sizeof(trayIcon) - sizeof(trayIcon.cbSize), &bytesRead)
-                    && (trayIcon.hWnd == winHandle))
-                    {
-                        // char WindowName[255];
-                        // GetWindowTextA(trayIcon.hWnd, WindowName, 255);
-                        result = true;
-                        break;                
-                    };
-            VirtualFreeEx(trayProcess, trayMemory, 0, MEM_RELEASE);
-            CloseHandle(trayProcess);
-        };
+    {
+        for (int i = 0; i < trayIcons; i++)
+            if ((SendMessage(trayHandle, TB_GETBUTTON, i, ((int)trayMemory)) > 0)
+                && ReadProcessMemory(trayProcess, trayMemory, &trayButton, sizeof(trayButton), &bytesRead)
+                && (trayButton.dwData > 0)
+                && ReadProcessMemory(trayProcess, (LPVOID)(trayButton.dwData), &(trayIcon.hWnd), sizeof(trayIcon) - sizeof(trayIcon.cbSize), &bytesRead)
+                && (trayIcon.hWnd == winHandle))
+            {
+                // char WindowName[255];
+                // GetWindowTextA(trayIcon.hWnd, WindowName, 255);
+                result = true;
+                break;
+            };
+        VirtualFreeEx(trayProcess, trayMemory, 0, MEM_RELEASE);
+        CloseHandle(trayProcess);
+    };
     return result;
 }
 
@@ -439,7 +447,7 @@ void minimizeToTray(TRCONTEXT* context, long restoreWindow) {
         }
     }
     if (context->iconIndex == MAXIMUM_WINDOWS) {
-        MessageBox(NULL, "Error! Too many hidden windows. Please unhide some.", "Traymond II", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Error! Too many hidden windows. Please unhide some.", "Traymond", MB_OK | MB_ICONERROR);
         return;
     }
     ULONG_PTR icon = GetClassLongPtr(currWin, GCLP_HICONSM);
@@ -452,10 +460,10 @@ void minimizeToTray(TRCONTEXT* context, long restoreWindow) {
 
     // Check if minimized
     WINDOWPLACEMENT wp;
-    if(GetWindowPlacement(currWin, &wp) && (wp.showCmd == SW_SHOWMINIMIZED)) return;
-    
+    if (GetWindowPlacement(currWin, &wp) && (wp.showCmd == SW_SHOWMINIMIZED)) return;
+
     // Check if already in Tray
-    if(context->iconIndex > 0)
+    if (context->iconIndex > 0)
         for (int i = 0; i < context->iconIndex; i++)
             if (context->icons[i].icon.uID == LOWORD(reinterpret_cast<UINT>(currWin)))
             {
@@ -498,7 +506,7 @@ void createTrayIcon(HWND mainWindow, HINSTANCE hInstance, NOTIFYICONDATA* icon) 
     icon->uVersion = NOTIFYICON_VERSION_4;
     icon->uID = reinterpret_cast<UINT>(mainWindow);
     icon->uCallbackMessage = WM_OURICON;
-    strcpy_s(icon->szTip, "Traymond II");
+    strcpy_s(icon->szTip, "Traymond");
     Shell_NotifyIcon(NIM_ADD, icon);
     Shell_NotifyIcon(NIM_SETVERSION, icon);
 }
@@ -515,23 +523,41 @@ void createTrayMenu(TRCONTEXT* context) {
     exitMenuItem.cch = 5;
     exitMenuItem.wID = EXIT_ID;
 
+    string unhide_text = "Restore All Windows (" + MY_UNTRAY_KEY + ")";
     MENUITEMINFO showAllMenuItem;
     showAllMenuItem.cbSize = sizeof(MENUITEMINFO);
     showAllMenuItem.fMask = MIIM_STRING | MIIM_ID;
     showAllMenuItem.fType = MFT_STRING;
-    std::string restoreLabel = "Restore All Windows (" + MY_UNTRAY_KEY + ")";
-    showAllMenuItem.dwTypeData = (LPSTR)restoreLabel.c_str();
-    showAllMenuItem.cch = restoreLabel.size();
+    showAllMenuItem.dwTypeData = (LPSTR)unhide_text.c_str();
+    showAllMenuItem.cch = unhide_text.size();
     showAllMenuItem.wID = SHOW_ALL_ID;
 
+    string hide_text = "Hide Foreground Window to Tray (" + MY_TRAY_KEY + ")";
     MENUITEMINFO hideFgndWndItem;
     hideFgndWndItem.cbSize = sizeof(MENUITEMINFO);
     hideFgndWndItem.fMask = MIIM_STRING | MIIM_ID;
     hideFgndWndItem.fType = MFT_STRING;
-    string hideLabel = "Hide Foreground Window to Tray (" + MY_TRAY_KEY + ")";
-    hideFgndWndItem.dwTypeData = (LPSTR)hideLabel.c_str();
-    hideFgndWndItem.cch = hideLabel.size();
+    hideFgndWndItem.dwTypeData = (LPSTR)hide_text.c_str();
+    hideFgndWndItem.cch = hide_text.size();
     hideFgndWndItem.wID = HIDE_FOREGROUND;
+
+    MENUITEMINFO muteFgndWndItem;
+    muteFgndWndItem.cbSize = sizeof(MENUITEMINFO);
+    muteFgndWndItem.fMask = MIIM_STRING | MIIM_ID;
+    muteFgndWndItem.fType = MFT_STRING;
+    string mute_text = "Toggle Mute of Foreground Window";
+    muteFgndWndItem.dwTypeData = (LPSTR)mute_text.c_str();
+    muteFgndWndItem.cch = mute_text.size();
+    muteFgndWndItem.wID = MUTE_FOREGROUND;
+
+    MENUITEMINFO muteMixerWndItem;
+    muteMixerWndItem.cbSize = sizeof(MENUITEMINFO);
+    muteMixerWndItem.fMask = MIIM_STRING | MIIM_ID;
+    muteMixerWndItem.fType = MFT_STRING;
+    string mute_mxxt = "Open System Mixer";
+    muteMixerWndItem.dwTypeData = (LPSTR)mute_mxxt.c_str();
+    muteMixerWndItem.cch = mute_mxxt.size();
+    muteMixerWndItem.wID = MUTE_MIXER;
 
     MENUITEMINFO autoRunMenu;
     autoRunMenu.cbSize = sizeof(MENUITEMINFO);
@@ -541,7 +567,7 @@ void createTrayMenu(TRCONTEXT* context) {
     autoRunMenu.fState = toggleAutorun(context, false) ? MFS_CHECKED : 0;
     autoRunMenu.cch = 27;
     autoRunMenu.wID = MNIT_AUTORUN;
-    
+
     MENUITEMINFO nonMultiMenuItem;
     nonMultiMenuItem.cbSize = sizeof(MENUITEMINFO);
     nonMultiMenuItem.fMask = MIIM_STRING | MIIM_ID | MIIM_STATE;
@@ -550,17 +576,79 @@ void createTrayMenu(TRCONTEXT* context) {
     nonMultiMenuItem.fState = toggleMultiIcons(context, false) ? MFS_CHECKED : 0;
     nonMultiMenuItem.cch = 24;
     nonMultiMenuItem.wID = MNIT_MLTICNS;
-   
+
     InsertMenuItem(context->trayMenu, 0, FALSE, &nonMultiMenuItem);
     InsertMenuItem(context->trayMenu, 0, FALSE, &autoRunMenu);
     InsertMenuItem(context->trayMenu, 0, FALSE, &exitMenuItem);
+    InsertMenu(context->trayMenu, 0, MF_SEPARATOR | MF_BYPOSITION, 0, NULL);
+    InsertMenuItem(context->trayMenu, 0, FALSE, &muteFgndWndItem);
+    InsertMenuItem(context->trayMenu, 0, FALSE, &muteMixerWndItem);
     InsertMenu(context->trayMenu, 0, MF_SEPARATOR | MF_BYPOSITION, 0, NULL);
     InsertMenuItem(context->trayMenu, 0, FALSE, &showAllMenuItem);
     InsertMenuItem(context->trayMenu, 0, FALSE, &hideFgndWndItem);
 }
 
+void toggleMute(HWND hwnd)
+{
+    DWORD procID = NULL;
+    GetWindowThreadProcessId(hwnd, &procID);
+
+    CoInitialize(NULL);
+
+    // Get the speakers (1st render + multimedia) device
+    IMMDeviceEnumerator* deviceEnumerator = NULL;
+    CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (LPVOID*)&deviceEnumerator);
+    IMMDevice* speakers = NULL;
+    deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &speakers);
+
+    // Activate the session manager, enumerator
+    IAudioSessionManager2* mgr = NULL;
+    IID IID_IAudioSessionManager2_;
+    IIDFromString((LPCOLESTR)L"{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}", &IID_IAudioSessionManager2_);
+    speakers->Activate(IID_IAudioSessionManager2_, CLSCTX_ALL, NULL, (void**)&mgr);
+
+    // enumerate sessions for on this device
+    IAudioSessionEnumerator* sessionEnumerator = NULL;
+    mgr->GetSessionEnumerator(&sessionEnumerator);
+    int count;
+    sessionEnumerator->GetCount(&count);
+
+    for (int i = 0; i < count; i++)
+    {
+        IAudioSessionControl* ctl = NULL;
+        sessionEnumerator->GetSession(i, &ctl);
+        IAudioSessionControl2* ctl2 = NULL;
+        ctl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&ctl2);
+
+        DWORD val;
+        ctl2->GetProcessId(&val);
+
+        if ((int)val == (int)procID)
+        {
+            ISimpleAudioVolume* volumeControl = NULL;
+            ctl->QueryInterface(__uuidof(ISimpleAudioVolume), (void**)&volumeControl);
+            BOOL muted = NULL;
+            volumeControl->GetMute(&muted);
+            GUID g;
+            if (muted) volumeControl->SetMute(FALSE, &g);
+            else volumeControl->SetMute(TRUE, &g);
+            volumeControl->Release();
+        };
+
+        ctl2->Release();
+        ctl->Release();
+    };
+
+    sessionEnumerator->Release();
+    mgr->Release();
+    speakers->Release();
+    deviceEnumerator->Release();
+
+    CoUninitialize();
+}
+
 // Shows all hidden windows;
-void showAllWindows(TRCONTEXT* context) 
+void showAllWindows(TRCONTEXT* context)
 {
     for (int i = 0; i < context->iconIndex; i++)
     {
@@ -579,7 +667,7 @@ void exitApp()
 }
 
 // Creates and reads the save file to restore hidden windows in case of unexpected termination
-void startup(TRCONTEXT* context) 
+void startup(TRCONTEXT* context)
 {
     if ((saveFile = CreateFile("traymond.dat", GENERIC_READ | GENERIC_WRITE, \
         0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
@@ -590,7 +678,7 @@ void startup(TRCONTEXT* context)
     // Check if we've crashed (i. e. there is a save file) during current uptime and
     // if there are windows to restore, in which case restore them and
     // display a reassuring message.
-    if (GetLastError() == ERROR_ALREADY_EXISTS) 
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
         DWORD numbytes;
         DWORD fileSize = GetFileSize(saveFile, NULL);
@@ -627,8 +715,24 @@ void startup(TRCONTEXT* context)
         }
         std::string restore_message = "Traymond had previously been terminated unexpectedly.\n\nRestored " + \
             std::to_string(context->iconIndex) + (context->iconIndex > 1 ? " icons." : " icon.");
-        MessageBox(NULL, restore_message.c_str(), "Traymond II", MB_OK);
+        MessageBox(NULL, restore_message.c_str(), "Traymond", MB_OK);
     }
+}
+
+static BOOL CALLBACK enumMuteCallback(HWND hWnd, LPARAM lparam) {
+    int length = GetWindowTextLength(hWnd);
+    char* buffer = new char[length + 1];
+    GetWindowText(hWnd, buffer, length + 1);
+    std::string windowTitle(buffer);
+    delete[] buffer;
+
+    //if (IsWindowVisible(hWnd) && length != 0 && !(GetWindowLong(hWnd, GWL_EXSTYLE) & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)) && !(GetWindowLong(hWnd, GWL_STYLE) & WS_MINIMIZE))
+    if (IsWindowVisible(hWnd) && length != 0 && !(GetWindowLong(hWnd, GWL_EXSTYLE) & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)))
+    {
+        toggleMute(hWnd);
+        return FALSE;
+    };
+    return TRUE;
 }
 
 static BOOL CALLBACK enumWindowCallback(HWND hWnd, LPARAM lparam) {
@@ -647,10 +751,21 @@ static BOOL CALLBACK enumWindowCallback(HWND hWnd, LPARAM lparam) {
     return TRUE;
 }
 
-// Hide Next Foreground Window
+// Hide Foreground Window
 void hideNextForegroundWindow(TRCONTEXT* context)
 {
     EnumWindows(enumWindowCallback, (LPARAM)context);
+}
+
+// Mute Next Foreground Window
+void muteNextForegroundWindow(TRCONTEXT* context)
+{
+    EnumWindows(enumMuteCallback, (LPARAM)context);
+}
+
+void openSystemMixer(TRCONTEXT* context)
+{
+    ShellExecute(NULL, "OPEN", "SndVol.exe", NULL, NULL, 1);
 }
 
 void detectExplorerReloadThread(TRCONTEXT* context, NOTIFYICONDATA* icon)
@@ -659,7 +774,7 @@ void detectExplorerReloadThread(TRCONTEXT* context, NOTIFYICONDATA* icon)
     {
         HWND hExp = FindWindow("Shell_TrayWnd", nullptr);
         if (hExp != nullptr && hExp != lastEplorerHandle)
-        {            
+        {
             if (lastEplorerHandle > 0)
             {
                 Shell_NotifyIcon(NIM_ADD, icon);
@@ -680,70 +795,76 @@ void detectExplorerReloadThread(TRCONTEXT* context, NOTIFYICONDATA* icon)
 void detectExplorerReload(TRCONTEXT* context, NOTIFYICONDATA* icon)
 {
     std::thread t1(detectExplorerReloadThread, context, icon);
-    t1.detach(); 
+    t1.detach();
     ChangeWindowMessageFilterEx(context->mainWindow, uTaskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated"), MSGFLT_ALLOW, NULL);
     ChangeWindowMessageFilterEx(context->mainWindow, WM_COMMAND, MSGFLT_ALLOW, NULL);
 }
 
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {    
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     TRCONTEXT* context = reinterpret_cast<TRCONTEXT*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-    POINT pt;       
+    POINT pt;
     switch (uMsg)
-    {        
-        case WM_ICON:
-            if (LOWORD(lParam) == WM_LBUTTONDBLCLK)
+    {
+    case WM_ICON:
+        if (LOWORD(lParam) == WM_LBUTTONDBLCLK)
+        {
+            showWindow(context, lParam);
+            clearMenu(context);
+        };
+        break;
+    case WM_OURICON:
+        if (LOWORD(lParam) == WM_RBUTTONUP)
+        {
+            SetForegroundWindow(hwnd);
+            GetCursorPos(&pt);
+            TrackPopupMenuEx(context->trayMenu, \
+                (GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_BOTTOMALIGN, \
+                pt.x, pt.y, hwnd, NULL);
+        };
+        break;
+    case WM_COMMAND:
+        if (HIWORD(wParam) == 0)
+        {
+            switch LOWORD(wParam)
             {
-                showWindow(context, lParam);
-                clearMenu(context);
-            };
-            break;
-        case WM_OURICON:
-            if (LOWORD(lParam) == WM_RBUTTONUP)
-            {
-                SetForegroundWindow(hwnd);
-                GetCursorPos(&pt);
-                TrackPopupMenuEx(context->trayMenu, \
-                    (GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_BOTTOMALIGN, \
-                    pt.x, pt.y, hwnd, NULL);
-            };
-            break;
-        case WM_COMMAND:
-            if (HIWORD(wParam) == 0)
-            {
-                switch LOWORD(wParam)
-                {   
-                    case MNIT_MLTICNS:
-                        toggleMultiIcons(context, true);
-                        break;
-                    case MNIT_AUTORUN:
-                        toggleAutorun(context, true);
-                        break;
-                    case HIDE_FOREGROUND:                             
-                        hideNextForegroundWindow(context);                  
-                        break;
-                    case SHOW_ALL_ID:
-                        showAllWindows(context);
-                        break;
-                    case EXIT_ID:
-                        exitApp();
-                        break;
-                };
-                if (LOWORD(wParam) >= 0xA0)
-                    clickWindowMenuItem(context, LOWORD(wParam));
-            };
-            break;
-        case WM_HOTKEY:
-            if (wParam == 0) {
-                minimizeToTray(context, NULL);
-            }
-            else if (wParam == 1) {
+            case MNIT_MLTICNS:
+                toggleMultiIcons(context, true);
+                break;
+            case MNIT_AUTORUN:
+                toggleAutorun(context, true);
+                break;
+            case HIDE_FOREGROUND:
+                hideNextForegroundWindow(context);
+                break;
+            case MUTE_FOREGROUND:
+                muteNextForegroundWindow(context);
+                break;
+            case MUTE_MIXER:
+                openSystemMixer(context);
+                break;
+            case SHOW_ALL_ID:
                 showAllWindows(context);
-            }
-            break;
-        default:     
-            if (uMsg == uTaskbarCreatedMsg) lastEplorerHandle = (HWND)-1;
-            return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }    
+                break;
+            case EXIT_ID:
+                exitApp();
+                break;
+            };
+            if (LOWORD(wParam) >= 0xA0)
+                clickWindowMenuItem(context, LOWORD(wParam));
+        };
+        break;
+    case WM_HOTKEY: // We only have one hotkey, so no need to check the message
+        if (wParam == 0) {
+            minimizeToTray(context, NULL);
+        }
+        else if (wParam == 1) {
+            showAllWindows(context);
+        }
+        break;
+    default:
+        if (uMsg == uTaskbarCreatedMsg) lastEplorerHandle = (HWND)-1;
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
 
     return 0;
 }
@@ -752,7 +873,7 @@ void initHotKey(LPSTR lpCmdLine)
 {
     try
     {
-        std:string args = std::string(lpCmdLine);
+    std:string args = std::string(lpCmdLine);
         if (args.empty()) return;
         for (auto& c : args) c = toupper(c);
 
@@ -831,11 +952,33 @@ void initHotKey(LPSTR lpCmdLine)
     };
 }
 
+// Retrieve the system error message for the last-error code
+void PrintError()
+{
+    LPVOID lpMsgBuf;
+    DWORD dw = GetLastError();
+
+    if (FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER |
+        FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        dw,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPTSTR)&lpMsgBuf,
+        0, NULL) == 0) {
+        MessageBox(NULL, TEXT("FormatMessage failed"), TEXT("Error"), MB_OK);
+    }
+
+    MessageBox(NULL, (LPCTSTR)lpMsgBuf, TEXT("Error"), MB_OK);
+
+    LocalFree(lpMsgBuf);
+}
+
 #pragma warning( push )
 #pragma warning( disable : 4100 )
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) 
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
-#pragma warning( pop )
     initHotKey(lpCmdLine);
     TRCONTEXT context = {};
     NOTIFYICONDATA icon = {};
@@ -873,16 +1016,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     SetWindowLongPtr(context.mainWindow, GWLP_USERDATA, reinterpret_cast<LONG>(&context));
 
     if (!RegisterHotKey(context.mainWindow, 0, MOD_KEY | MOD_NOREPEAT, TRAY_KEY)) {
-        MessageBox(NULL, "Error! Could not register the hotkey.", "Traymond", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Error! Could not register the tray hotkey.", "Traymond", MB_OK | MB_ICONERROR);
+        PrintError();
         return 1;
     }
     if (!RegisterHotKey(context.mainWindow, 1, MOD_KEY | MOD_NOREPEAT, UNTRAY_KEY)) {
-        MessageBox(NULL, "Error! Could not register the hotkey.", "Traymond", MB_OK | MB_ICONERROR);
+        PrintError();
+        MessageBox(NULL, "Error! Could not register the untray hotkey.", "Traymond", MB_OK | MB_ICONERROR);
         return 1;
     }
 
     createTrayIcon(context.mainWindow, hInstance, &icon);
-    createTrayMenu(&context);    
+    createTrayMenu(&context);
     startup(&context);
     detectExplorerReload(&context, &icon);
 
@@ -901,7 +1046,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     CloseHandle(saveFile);
     DestroyMenu(context.trayMenu);
     DestroyWindow(context.mainWindow);
-    DeleteFile("traymond2.dat"); // No save file means we have exited gracefully
+    DeleteFile("traymond.dat"); // No save file means we have exited gracefully
     UnregisterHotKey(context.mainWindow, 0);
     return msg.wParam;
 }
